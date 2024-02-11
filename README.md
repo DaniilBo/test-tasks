@@ -20,14 +20,17 @@
      ```
      curl -LO https://dl.k8s.io/release/`curl -LS https://dl.k8s.io/release/stable.txt`/bin/linux/amd64/kubectl
      ```
+     
   2. Сделайте бинарный файл kubectl исполняемым:
      ```
      chmod +x ./kubectl
      ```
+     
   3. Переместите бинарный файл в директорию из переменной окружения PATH:
      ```
      sudo mv ./kubectl /usr/local/bin/kubectl
      ```
+     
   4. Убедитесь, что установлена последняя версия:
      ```
      kubectl version --client
@@ -55,8 +58,85 @@
 ```
 minikube start --vm-driver=<driver_name>
 ```
+
 - Проверьте статус Minikube с помощью команды:
 ```
 minikube status
 ```
 
+### 2. Установка Jenkins
+
+- Создайте файл `jenkins-deployment.yaml` со следующим содержимым:
+   ```yaml
+   apiVersion: apps/v1
+   kind: Deployment
+   metadata:
+     name: jenkins
+     labels:
+       app: jenkins
+   spec:
+     replicas: 1
+     selector:
+       matchLabels:
+         app: jenkins
+     template:
+       metadata:
+         labels:
+           app: jenkins
+       spec:
+         containers:
+           - name: jenkins
+             image: jenkins/jenkins:lts
+             ports:
+               - containerPort: 8080
+               - containerPort: 50000
+   ```
+   
+- Создайте Deployment в Kubernetes:
+   ```
+   kubectl apply -f jenkins-deployment.yaml
+   ```
+   
+- Создайте файл `jenkins-service.yaml` со следующим содержимым:
+   ```yaml
+   apiVersion: v1
+   kind: Service
+   metadata:
+     name: jenkins-service
+   spec:
+     type: NodePort
+     ports:
+       - name: http
+         port: 8080
+         targetPort: 8080
+         nodePort: 30000
+       - name: jnlp
+         port: 50000
+         targetPort: 50000
+     selector:
+       app: jenkins
+   ```
+   
+- Создайте Service в Kubernetes:
+   ```
+   kubectl apply -f jenkins-service.yaml
+   ```
+
+- Получите внешний IP-адрес сервиса Jenkins:
+   ```
+   minikube service jenkins-service --url
+   ```
+
+- Откройте Jenkins веб-интерфейс, используя полученный IP-адрес с портом 30000:
+   ```
+   http://<minikube-ip>:30000
+   ```
+
+- Введите команду для получения пароля для входа в Jenkins:
+   ```
+   kubectl exec -it <jenkins-pod-name> -- cat /var/jenkins_home/secrets/initialAdminPassword
+   ```
+
+- Скопируйте пароль и введите его на странице входа в Jenkins, после чего следуйте алгоритму действий на странице.
+
+Теперь Jenkins успешно развернут в Minikube и готов к использованию.
