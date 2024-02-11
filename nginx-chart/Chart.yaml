@@ -1,0 +1,12 @@
+apiVersion: v2
+name: nginx-chart
+description: A Helm chart for nginx installation on nodePort 32080
+
+# An 'application' or a 'library'
+type: application
+
+# Chart version
+version: 0.1.0
+
+# This is the version number of the application being deployed. In this case: latest
+appVersion: "latest"
