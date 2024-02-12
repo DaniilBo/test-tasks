@@ -170,7 +170,7 @@ minikube status
 
 - Создайте файл `deployment.yaml` со следующим содержимым:
 
-  ```
+  ```yaml
   apiVersion: apps/v1
   kind: Deployment
   metadata:
@@ -244,7 +244,7 @@ minikube status
 
 - Создайте файл `service.yaml` со следующим содержимым:
 
-  ```
+  ```yaml
   apiVersion: v1
   kind: Service
   metadata:
