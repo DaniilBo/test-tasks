@@ -54,7 +54,7 @@
 
 - Чтобы убедиться, что Minikube был установлен корректно, выполните следующую команду, которая запускает локальный кластер Kubernetes:
   
-> **Примечание**: Для использования опции `--vm-driver` с командой `minikube start` укажите имя установленного вами гипервизора в нижнем регистре в заполнителе `<driver_name>` команды ниже. **Например**: *docker*, *virtualbox*, *kvm2*.
+> **Примечание**: Для использования опции `--vm-driver` с командой `minikube start` укажите имя установленного вами гипервизора в нижнем регистре в заполнителе `<driver_name>` команды ниже. **Например**: *docker*, *virtualbox*, *kvm2*. **Рекомендуемый выбор**: docker.
 ```
 minikube start --vm-driver=<driver_name>
 ```
@@ -70,87 +70,235 @@ minikube status
 
 - Создайте отдельное пространство имён для Jenkins:
   ```
-  kubectl create namespace jenkins
+  kubectl create namespace devops-tools
   ```
 
-- Создайте файл `jenkins-deployment.yaml` со следующим содержимым:
-   ```yaml
-    apiVersion: apps/v1
-    kind: Deployment
-    metadata:
-      name: jenkins
-      namespace: jenkins
-      labels:
-        app: jenkins
-    spec:
-      replicas: 1
-      selector:
-        matchLabels:
-          app: jenkins
-      template:
-        metadata:
-          labels:
-            app: jenkins
-        spec:
-          containers:
-            - name: jenkins
-              image: jenkins/jenkins:lts
-              ports:
-                - containerPort: 8080
-                - containerPort: 50000
-      
-   ```
+- Создайте файл `serviceAccount.yaml` со следующим содержимым:
+  
+  ```yaml
+  ---
+  apiVersion: rbac.authorization.k8s.io/v1
+  kind: ClusterRole
+  metadata:
+    name: jenkins-admin
+  rules:
+    - apiGroups: [""]
+      resources: ["*"]
+      verbs: ["*"]
+  ---
+  apiVersion: v1
+  kind: ServiceAccount
+  metadata:
+    name: jenkins-admin
+    namespace: devops-tools
+  ---
+  apiVersion: rbac.authorization.k8s.io/v1
+  kind: ClusterRoleBinding
+  metadata:
+    name: jenkins-admin
+  roleRef:
+    apiGroup: rbac.authorization.k8s.io
+    kind: ClusterRole
+    name: jenkins-admin
+  subjects:
+  - kind: ServiceAccount
+    name: jenkins-admin
+    namespace: devops-tools
+  ```
    
-- Создайте Deployment в Kubernetes:
-   ```
-   kubectl apply -f jenkins-deployment.yaml
-   ```
+- Создайте serviceAccount в Kubernetes:
+  
+  ```
+  kubectl apply -f serviceAccount.yaml
+  ```
    
-- Создайте файл `jenkins-service.yaml` со следующим содержимым:
-   ```yaml
-    apiVersion: v1
-    kind: Service
-    metadata:
-      name: jenkins-service
-      namespace: jenkins
-    spec:
-      type: NodePort
-      ports:
-        - name: http
-          port: 8080
-          targetPort: 8080
-          nodePort: 30000
-        - name: jnlp
-          port: 50000
-          targetPort: 50000
-      selector:
-        app: jenkins
-   ```
+- Создайте файл `volume.yaml` со следующим содержимым:
+  
+  ```yaml
+  kind: StorageClass
+  apiVersion: storage.k8s.io/v1
+  metadata:
+    name: local-storage
+  provisioner: kubernetes.io/no-provisioner
+  volumeBindingMode: WaitForFirstConsumer
+  ---
+  apiVersion: v1
+  kind: PersistentVolume
+  metadata:
+    name: jenkins-pv-volume
+    labels:
+      type: local
+  spec:
+    storageClassName: local-storage
+    claimRef:
+      name: jenkins-pv-claim
+      namespace: devops-tools
+    capacity:
+      storage: 10Gi
+    accessModes:
+      - ReadWriteOnce
+    local:
+      path: /mnt
+    nodeAffinity:
+      required:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: kubernetes.io/hostname
+            operator: In
+            values:
+            - minikube
+  ---
+  apiVersion: v1
+  kind: PersistentVolumeClaim
+  metadata:
+    name: jenkins-pv-claim
+    namespace: devops-tools
+  spec:
+    storageClassName: local-storage
+    accessModes:
+      - ReadWriteOnce
+    resources:
+      requests:
+        storage: 3Gi
+  ```
    
-- Создайте Service в Kubernetes:
-   ```
-   kubectl apply -f jenkins-service.yaml
-   ```
+- Создайте volume в Kubernetes:
+  
+  ```
+  kubectl create -f volume.yaml
+  ```
 
-- Получите внешний IP-адрес сервиса Jenkins:
-   ```
-   minikube service jenkins-service -n jenkins --url
-   ```
+- Создайте файл `deployment.yaml` со следующим содержимым:
 
-- Откройте Jenkins веб-интерфейс, используя полученный IP-адрес с портом 30000:
-   ```
-   http://<minikube-ip>:30000
-   ```
+  ```
+  apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: jenkins
+    namespace: devops-tools
+  spec:
+    replicas: 1
+    selector:
+      matchLabels:
+        app: jenkins-server
+    template:
+      metadata:
+        labels:
+          app: jenkins-server
+      spec:
+        securityContext:
+              fsGroup: 1000
+              runAsUser: 1000
+        serviceAccountName: jenkins-admin
+        containers:
+          - name: jenkins
+            image: jenkins/jenkins:lts
+            resources:
+              limits:
+                memory: "2Gi"
+                cpu: "1000m"
+              requests:
+                memory: "500Mi"
+                cpu: "500m"
+            ports:
+              - name: httpport
+                containerPort: 8080
+              - name: jnlpport
+                containerPort: 50000
+            livenessProbe:
+              httpGet:
+                path: "/login"
+                port: 8080
+              initialDelaySeconds: 90
+              periodSeconds: 10
+              timeoutSeconds: 5
+              failureThreshold: 5
+            readinessProbe:
+              httpGet:
+                path: "/login"
+                port: 8080
+              initialDelaySeconds: 60
+              periodSeconds: 10
+              timeoutSeconds: 5
+              failureThreshold: 3
+            volumeMounts:
+              - name: jenkins-data
+                mountPath: /var/jenkins_home
+        volumes:
+          - name: jenkins-data
+            persistentVolumeClaim:
+                claimName: jenkins-pv-claim  
+  ```
+
+- Создайте deployment в Kubernetes:
+  
+  ```
+  kubectl apply -f deployment.yaml
+  ```
+
+- Теперь можно проверить состояние deployment при помощи команды:
+
+  ```
+  kubectl get deployments -n devops-tools
+  ``` 
+
+- Создайте файл `service.yaml` со следующим содержимым:
+
+  ```
+  apiVersion: v1
+  kind: Service
+  metadata:
+    name: jenkins-service
+    namespace: devops-tools
+    annotations:
+        prometheus.io/scrape: 'true'
+        prometheus.io/path:   /
+        prometheus.io/port:   '8080'
+  spec:
+    selector:
+      app: jenkins-server
+    type: NodePort
+    ports:
+      - port: 8080
+        targetPort: 8080
+        nodePort: 32000
+  ```
+
+- Создайте service в Kubernetes:
+
+  ```
+  kubectl apply -f service.yaml
+  ```
+
+- Получите внешний IP-адрес и порт сервиса Jenkins:
+  
+  ```
+  minikube service jenkins-service -n devops-tools --url
+  ```
+
+- Откройте Jenkins веб-интерфейс, используя полученный IP-адрес и порт:
+  
+  ```
+  http://<minikube-ip>:<port>
+  ```
 
 - Чтобы узнать `<jenkins-pod-name>` введите команду:
-   ```
-   kubectl get -n jenkins Pods
-   ```
+  
+  ```
+  kubectl get -n devops-tools Pods
+  ```
 
-- Введите команду для получения пароля для входа в Jenkins:
-   ```
-   kubectl exec -it <jenkins-pod-name> -n jenkins -- cat /var/jenkins_home/secrets/initialAdminPassword
-   ```
+- Введите команду для получения пароля для первоначального входа в Jenkins:
+  
+  ```
+  kubectl exec -it <jenkins-pod-name> -n devops-tools -- cat /var/jenkins_home/secrets/initialAdminPassword
+  ```
+
+  - Если это не сработало, то пароль можно также узнать, введя команду для получения логов, указанную ниже. В таком случае пароль будет находиться внизу
+ 
+    ```
+    kubectl logs <jenkins-pod-name> --namespace=devops-tools
+    ```
 
 ### 3. Настройка Jenkins
 
@@ -166,7 +314,7 @@ minikube status
 - В "System Configuration" выберите "Plugins" (Плагины).
 - В разделе "Available plugins" (Доступные плагины) найдите нужный плагин и установите его. Вам потребуется следующий плагин:
   
-  > **Примечание:** перезапускать Jenkins после установки плагина не нужно.
+  > **Примечание:** перезапускать Jenkins после установки плагина не обязательно.
   
   - Kubernetes Plugin: позволяет использовать Kubernetes для запуска сборок и деплоя в Jenkins.
 
@@ -178,12 +326,14 @@ minikube status
 - Раскройте "Kubernetes Cloud details" и в качестве KUbernetes URL введите `https://<Minikube-IP>:<Port>`.
   
   - `https://<Minikube-IP>:<Port>` можно узнать, введя следующую команду:
+    
     ```
     kubectl cluster-info
     ```
-    
--
--
--
- 
+
 Теперь Jenkins успешно развернут в Minikube и готов к использованию.
+
+### 6. Создание Jenkins Job
+
+
+
