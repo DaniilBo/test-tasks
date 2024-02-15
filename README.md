@@ -17,34 +17,38 @@
 
   - Откройте терминал и загрузите последнюю версию kubectl с помощью команды:
 
-     ```
-     curl -LO https://dl.k8s.io/release/`curl -LS https://dl.k8s.io/release/stable.txt`/bin/linux/amd64/kubectl
-     ```
+    ```
+    curl -LO https://dl.k8s.io/release/`curl -LS https://dl.k8s.io/release/stable.txt`/bin/linux/amd64/kubectl
+    ```
      
   - Сделайте бинарный файл kubectl исполняемым:
-     ```
-     chmod +x ./kubectl
-     ```
+    
+    ```
+    chmod +x ./kubectl
+    ```
      
   - Переместите бинарный файл в директорию из переменной окружения PATH:
-     ```
-     sudo mv ./kubectl /usr/local/bin/kubectl
-     ```
+    
+    ```
+    sudo mv ./kubectl /usr/local/bin/kubectl
+    ```
      
   - Убедитесь, что установлена последняя версия:
-     ```
-     kubectl version --client
-
-     ```
+    
+    ```
+    kubectl version --client
+    ```
 
 #### Установка
 
 - Откройте терминал и выполните следующую команду, чтобы загрузить двоичный файл:
+  
   ```
   curl -Lo minikube https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64 \
   && chmod +x minikube
   ```
 - Чтобы исполняемый файл Minikube был доступен из любой директории выполните следующие команды:
+  
   ```
   sudo mkdir -p /usr/local/bin/
   sudo install minikube /usr/local/bin/
@@ -55,20 +59,23 @@
 - Чтобы убедиться, что Minikube был установлен корректно, выполните следующую команду, которая запускает локальный кластер Kubernetes:
   
 > **Примечание**: Для использования опции `--vm-driver` с командой `minikube start` укажите имя установленного вами гипервизора в нижнем регистре в заполнителе `<driver_name>` команды ниже. **Например**: *docker*, *virtualbox*, *kvm2*. **Рекомендуемый выбор**: docker.
-```
-minikube start --vm-driver=<driver_name>
-```
+
+  ```
+  minikube start --vm-driver=<driver_name>
+  ```
 
 - Проверьте статус Minikube с помощью команды:
-```
-minikube status
-```
+  
+  ```
+  minikube status
+  ```
 
 ### 2. Установка Jenkins
 
 > **Примечание** все файлы следует создавать в директории проекта.
 
 - Создайте отдельное пространство имён для Jenkins:
+  
   ```
   kubectl create namespace devops-tools
   ```
@@ -100,6 +107,28 @@ minikube status
     apiGroup: rbac.authorization.k8s.io
     kind: ClusterRole
     name: jenkins-admin
+  subjects:
+  - kind: ServiceAccount
+    name: jenkins-admin
+    namespace: devops-tools
+  ---
+  apiVersion: rbac.authorization.k8s.io/v1
+  kind: ClusterRole
+  metadata:
+    name: deployer
+  rules:
+    - apiGroups: ["apps"]
+      resources: ["deployments"]
+      verbs: ["get", "list", "watch", "create", "delete", "patch", "update"]
+  ---
+  apiVersion: rbac.authorization.k8s.io/v1
+  kind: ClusterRoleBinding
+  metadata:
+    name: deployer-binding
+  roleRef:
+    apiGroup: rbac.authorization.k8s.io
+    kind: ClusterRole
+    name: deployer
   subjects:
   - kind: ServiceAccount
     name: jenkins-admin
@@ -276,19 +305,14 @@ minikube status
   minikube service jenkins-service -n devops-tools --url
   ```
 
-- Откройте Jenkins веб-интерфейс, используя полученный IP-адрес и порт:
-  
-  ```
-  http://<minikube-ip>:<port>
-  ```
-
+- Откройте Jenkins веб-интерфейс по адресу `http://<minikube-ip>:<port>`, используя полученный IP-адрес и порт вместо <minikube-ip> и <port> соответственно:
 - Чтобы узнать `<jenkins-pod-name>` введите команду:
   
   ```
   kubectl get -n devops-tools Pods
   ```
 
-- Введите команду для получения пароля для первоначального входа в Jenkins:
+- Введите команду для получения пароля для первоначального входа в Jenkins, заменив <jenkins-pod-name> на имя пода, полученное в ходе выполнения предыдущего шага:
   
   ```
   kubectl exec -it <jenkins-pod-name> -n devops-tools -- cat /var/jenkins_home/secrets/initialAdminPassword
@@ -312,28 +336,74 @@ minikube status
     
 - Перейдите в раздел "Manage Jenkins" (Настроить Jenkins).
 - В "System Configuration" выберите "Plugins" (Плагины).
-- В разделе "Available plugins" (Доступные плагины) найдите нужный плагин и установите его. Вам потребуется следующий плагин:
+- В разделе "Available plugins" (Доступные плагины) найдите нужный плагин и установите его. Вам потребуется следующие плагины:
   
-  > **Примечание:** перезапускать Jenkins после установки плагина не обязательно.
+  > **Примечание:** перезапускать Jenkins после установки плагина не обязательно, но можно.
   
   - Kubernetes Plugin: позволяет использовать Kubernetes для запуска сборок и деплоя в Jenkins.
+  - Kubernetes CLI Plugin: позволяет использовать kubectl в пайплайне
 
-### 5. Настройка подключения Jenkins к Minikube
+### 5. Создание Jenkins Job
 
-- Перейдите в раздел "Manage Jenkins" (Настроить Jenkins).
-- В "System Configuration" выберите "Clouds" (Облака) и выберите "New cloud" (Новое облако).
-- Выберите "Kubernetes" в качестве типа облака, затем введите его Название.
-- Раскройте "Kubernetes Cloud details" и в качестве KUbernetes URL введите `https://<Minikube-IP>:<Port>`.
-  
-  - `https://<Minikube-IP>:<Port>` можно узнать, введя следующую команду:
+- Создайте новую Jinkins Job, выбрав тип Pipeline, введите желаемое Название.
+- Пролистайте в самый низ и затем введите в соответствующее поле следующий скрипт:
+> **ВНИМАНИЕ!!!** В stage 'Apply HELM Chart' в поле serverUrl вам необходимо использовать IP вашей ноды кластера Kubernetes!
+> **Примечание:** В случае необходимости вы можете изменить скрипт, скачав актуальную версию HELM и kubectl 
+
+  ```bash
+  pipeline {
+      agent any
+      stages{
+          stage('Install HELM') {
+              steps {
+                  sh 'pwd'
+                  sh 'curl -fsSL -o helm.tar.gz https://get.helm.sh/helm-v3.7.2-linux-amd64.tar.gz'
+                  sh 'tar -zxvf helm.tar.gz '
+                  sh 'chmod +x linux-amd64/helm'
+                  sh './linux-amd64/helm version'
+              }
+          }
+          stage('Pull Repo') {
+              steps {
+                  git 'https://github.com/DaniilBo/test-tasks.git'
+                  sh 'pwd'
+                  sh 'ls -l'
+              }
+          }
+          stage('Install Kubectl'){
+              steps {
+                  sh 'curl -LO "https://storage.googleapis.com/kubernetes-release/release/v1.20.5/bin/linux/amd64/kubectl"'  
+                  sh 'chmod u+x ./kubectl'
+              }
+          }
+          stage('Apply HELM Chart') {
+              steps {
+                  withKubeConfig([serverUrl: 'https://192.168.49.2:8443']) {
+                      sh './linux-amd64/helm upgrade --install nginx-chart /var/jenkins_home/workspace/test-task/nginx-chart -n devops-tools'
+                      sh './kubectl get pods -n devops-tools'
+                  }
+              } 
+          } 
+      }
+  }          
+  ```
+
+### 6. Проверка доступности Nginx
+
+Чтобы проверить доступность nginx по требуемому порту (в данном случае: 32080), нужно:
+
+- Узнать IP адрес нода, используя следующую команду:
+
+  ```
+  minikube ip
+  ```
+
+- Далее можно использовать один из способов на выбор:
+
+  - Ввести команду ниже, заменив <minikube-ip> на IP адреc нода, полученный в ходе выполнения предыдущего шага, а <port> на порт, требуемый ngibx (а данном случае - 32080):
     
     ```
-    kubectl cluster-info
+    curl <minikube-ip>:<port>
     ```
-
-Теперь Jenkins успешно развернут в Minikube и готов к использованию.
-
-### 6. Создание Jenkins Job
-
-
-
+    
+  - Зайти на страницу при помощи браузера по следующему адресу `http://<minikube-ip>:<port>`, заменив <minikube-ip> на IP адреc нода, полученный в ходе выполнения предыдущего шага, а <port> на порт, требуемый ngibx (а данном случае - 32080):
