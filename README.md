@@ -41,7 +41,7 @@
 
 #### Установка
 
-- Откройте терминал и выполните следующую команду, чтобы загрузить двоичный файл:
+- Откройте терминал и выполните следующую команду, чтобы загрузить бинарный файл:
   
   ```
   curl -Lo minikube https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64 \
@@ -312,7 +312,7 @@
   kubectl get -n devops-tools Pods
   ```
 
-- Введите команду для получения пароля для первоначального входа в Jenkins, заменив <jenkins-pod-name> на имя пода, полученное в ходе выполнения предыдущего шага:
+- Введите команду для получения пароля для первоначального входа в Jenkins, заменив `<jenkins-pod-name>` на имя пода, полученное в ходе выполнения предыдущего шага:
   
   ```
   kubectl exec -it <jenkins-pod-name> -n devops-tools -- cat /var/jenkins_home/secrets/initialAdminPassword
@@ -347,7 +347,7 @@
 
 - Создайте новую Jinkins Job, выбрав тип Pipeline, введите желаемое Название.
 - Пролистайте в самый низ и затем введите в соответствующее поле следующий скрипт:
-> **ВНИМАНИЕ!!!** В stage 'Apply HELM Chart' в поле serverUrl вам необходимо использовать IP вашей ноды кластера Kubernetes!
+> **ВНИМАНИЕ!!!** В stage 'Apply HELM Chart' в поле serverUrl вместо `<yourServerIP>` вам необходимо использовать IP вашей ноды кластера Kubernetes!
 > **Примечание:** В случае необходимости вы можете изменить скрипт, скачав актуальную версию HELM и kubectl 
 
   ```bash
@@ -378,7 +378,7 @@
           }
           stage('Apply HELM Chart') {
               steps {
-                  withKubeConfig([serverUrl: 'https://192.168.49.2:8443']) {
+                  withKubeConfig([serverUrl: '<yourServerIP>:8443']) {
                       sh './linux-amd64/helm upgrade --install nginx-chart /var/jenkins_home/workspace/test-task/nginx-chart -n devops-tools'
                       sh './kubectl get pods -n devops-tools'
                   }
@@ -400,10 +400,10 @@
 
 - Далее можно использовать один из способов на выбор:
 
-  - Ввести команду ниже, заменив <minikube-ip> на IP адреc нода, полученный в ходе выполнения предыдущего шага, а <port> на порт, требуемый ngibx (а данном случае - 32080):
+  - Ввести команду ниже, заменив `<minikube-ip>` на IP адреc нода, полученный в ходе выполнения предыдущего шага, а `<port>` на порт, требуемый nginx (а данном случае - 32080):
     
     ```
     curl <minikube-ip>:<port>
     ```
     
-  - Зайти на страницу при помощи браузера по следующему адресу `http://<minikube-ip>:<port>`, заменив <minikube-ip> на IP адреc нода, полученный в ходе выполнения предыдущего шага, а <port> на порт, требуемый ngibx (а данном случае - 32080):
+  - Зайти на страницу при помощи браузера по следующему адресу `http://<minikube-ip>:<port>`, заменив `<minikube-ip>` на IP адреc нода, полученный в ходе выполнения предыдущего шага, а <port> на порт, требуемый nginx (а данном случае - 32080):
